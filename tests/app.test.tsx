@@ -272,3 +272,70 @@ it("keeps invalid server-rejected keys disconnected without echoing credentials"
   expect(screen.getByRole("alert").textContent).not.toContain(secret);
   expect(localStorage.getItem("gather-demo")).not.toContain(secret);
 });
+
+it("lets the user cancel generation while retaining the current event", async () => {
+  const u = userEvent.setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url, options) => {
+      if (String(url).includes("/models?"))
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                name: "models/gemini-3.5-flash",
+                supportedGenerationMethods: ["generateContent"],
+              },
+            ],
+          }),
+        };
+      if (
+        JSON.parse(options.body).generationConfig.responseJsonSchema.properties
+          .ok
+      )
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: { parts: [{ text: '{"ok":true}' }] },
+                finishReason: "STOP",
+              },
+            ],
+          }),
+        };
+      return new Promise((_resolve, reject) =>
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        ),
+      );
+    }),
+  );
+  render(<App />);
+  await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
+  await u.type(
+    screen.getByLabelText("Gemini API key"),
+    "test_only_key_12345678901234567890",
+  );
+  await u.click(screen.getByRole("button", { name: "Use my key" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "AI connected" })).toBeTruthy(),
+  );
+  await u.click(screen.getByRole("button", { name: "New event" }));
+  await u.type(screen.getByLabelText("Event name"), "Cancelled party");
+  await u.click(
+    screen.getByRole("button", { name: "Create my plan with Gemini" }),
+  );
+  await u.click(
+    await screen.findByRole("button", { name: "Cancel generation" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("cancelled"),
+  );
+  expect(JSON.parse(localStorage.getItem("gather-demo")!).brief.name).toBe(
+    "Ananya & Aarav’s wedding",
+  );
+});

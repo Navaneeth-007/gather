@@ -1614,3 +1614,8 @@ footer,
   font-size: 11px;
   margin: 8px 0 0;
 }
+
+.cancel-generation {
+  width: 100%;
+  margin-top: 10px;
+}

@@ -10,7 +10,10 @@ import {
 import { demoEvent, initialBrief } from "../src/demo";
 const key = "test_only_key_12345678901234567890";
 const brief = { ...initialBrief, date: "2099-02-14" };
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 describe("bring your own Gemini key", () => {
   it("sends the key only in a header to Google and validates structured output", async () => {
     const plan = demoEvent(brief).plan;
@@ -320,4 +323,101 @@ it("tries Flash as well as Flash-Lite instead of spending every attempt on older
   );
   expect(await connectAutomaticModel(key)).toBe("gemini-3.8-flash");
   expect(paths).toHaveLength(3);
+});
+
+describe("generation latency and cancellation", () => {
+  const response = (data: unknown) => ({ ok: true, json: async () => data });
+  const modelList = response({
+    models: ["gemini-2.5-flash-lite", "gemini-3.8-flash"].map((name) => ({
+      name: "models/" + name,
+      supportedGenerationMethods: ["generateContent"],
+    })),
+  });
+  const planReply = response({
+    candidates: [
+      {
+        content: { parts: [{ text: JSON.stringify(demoEvent(brief).plan) }] },
+        finishReason: "STOP",
+      },
+    ],
+  });
+  const waitForAbort = (signal: AbortSignal) =>
+    new Promise((_resolve, reject) =>
+      signal.addEventListener(
+        "abort",
+        () => reject(new DOMException("Aborted", "AbortError")),
+        { once: true },
+      ),
+    );
+  it("aborts a slow first model and successfully completes with an alternative", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    const progress: string[] = [];
+    const f = vi.fn(async (url, options) => {
+      if (String(url).includes("/models?")) return modelList;
+      if (++attempt === 1) return waitForAbort(options.signal);
+      return planReply;
+    });
+    vi.stubGlobal("fetch", f);
+    const done = expect(
+      generateWithAutomaticModel(key, "gemini-3.5-flash", brief, {
+        onProgress: (text) => progress.push(text),
+      }),
+    ).resolves.toEqual({
+      model: "gemini-2.5-flash-lite",
+      plan: demoEvent(brief).plan,
+    });
+    await vi.advanceTimersByTimeAsync(40001);
+    await done;
+    expect(attempt).toBe(2);
+    expect(progress.some((text) => text.includes("Trying another model"))).toBe(
+      true,
+    );
+    expect(f.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+  it("stops after the total deadline instead of retrying indefinitely", async () => {
+    vi.useFakeTimers();
+    const f = vi.fn(async (url, options) =>
+      String(url).includes("/models?")
+        ? modelList
+        : waitForAbort(options.signal),
+    );
+    vi.stubGlobal("fetch", f);
+    const done = expect(
+      generateWithAutomaticModel(key, "gemini-3.5-flash", brief),
+    ).rejects.toThrow("Gemini stayed busy");
+    await vi.advanceTimersByTimeAsync(120001);
+    await done;
+    expect(f).toHaveBeenCalledTimes(4);
+  });
+  it("cancels the active request without trying another model", async () => {
+    const controller = new AbortController();
+    const f = vi.fn(async (_url, options) => waitForAbort(options.signal));
+    vi.stubGlobal("fetch", f);
+    const done = expect(
+      generateWithAutomaticModel(key, "gemini-3.5-flash", brief, {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled");
+    controller.abort();
+    await done;
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it("uses model-specific low-latency settings and a compact response schema", async () => {
+    const f = vi.fn().mockResolvedValue(planReply);
+    vi.stubGlobal("fetch", f);
+    for (const [model, thinking] of [
+      ["gemini-3.5-flash", { thinkingLevel: "low" }],
+      ["gemini-3.5-flash-lite", { thinkingLevel: "minimal" }],
+      ["gemini-2.5-flash", { thinkingBudget: 0 }],
+    ] as const) {
+      await generateWithOwnKey(key, model, brief);
+      const body = JSON.parse(f.mock.calls.at(-1)![1].body);
+      expect(body.generationConfig.thinkingConfig).toEqual(thinking);
+      expect(body.generationConfig.maxOutputTokens).toBe(4096);
+      expect(
+        body.generationConfig.responseJsonSchema.properties.tasks.maxItems,
+      ).toBe(10);
+    }
+  });
 });

@@ -73,6 +73,9 @@ export default function App() {
   const [keyPanel, setKeyPanel] = useState(false);
   const [model, setModel] = useState("");
   const [connectionProgress, setConnectionProgress] = useState("");
+  const [generationProgress, setGenerationProgress] = useState("");
+  const generationAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => generationAbort.current?.abort(), []);
   const [event, setEvent] = useState<EventData>(readLocal);
   const [tab, setTab] = useState("Overview");
   const [modal, setModal] = useState(false);
@@ -146,6 +149,8 @@ export default function App() {
       return;
     }
     setBusy(true);
+    const controller = new AbortController();
+    generationAbort.current = controller;
     try {
       let next: EventData;
       if (keyConnected) {
@@ -153,6 +158,7 @@ export default function App() {
           apiKey.current,
           model,
           parsed.data,
+          { signal: controller.signal, onProgress: setGenerationProgress },
         );
         next = {
           brief: parsed.data,
@@ -164,6 +170,10 @@ export default function App() {
       } else {
         next = demoEvent(parsed.data);
       }
+      if (controller.signal.aborted)
+        throw new Error(
+          "Plan generation cancelled. Your existing plan is safe.",
+        );
       setEvent(next);
       setTab("Overview");
       setModal(false);
@@ -176,6 +186,8 @@ export default function App() {
       setError(errorText(e));
     } finally {
       setBusy(false);
+      generationAbort.current = null;
+      setGenerationProgress("");
     }
   }
   function exportPlan() {
@@ -1148,6 +1160,11 @@ export default function App() {
             Creating a plan replaces the current view; save or export edits
             first.
           </p>
+          {generationProgress && (
+            <p className="footnote" role="status">
+              {generationProgress}
+            </p>
+          )}
           <button className="button primary generate" disabled={busy}>
             {busy ? (
               <LoaderCircle className="spin" size={18} />
@@ -1160,6 +1177,15 @@ export default function App() {
                 ? "Create my plan with Gemini"
                 : "Create a sample plan"}
           </button>
+          {generationProgress && (
+            <button
+              type="button"
+              className="button cancel-generation"
+              onClick={() => generationAbort.current?.abort()}
+            >
+              Cancel generation
+            </button>
+          )}
         </form>
       </dialog>
     </div>
