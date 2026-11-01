@@ -185,7 +185,7 @@ textarea {
   font-size: 10px;
   margin-top: 12px;
 }
-.account {
+.local-space {
   margin-top: auto;
   border-top: 1px solid var(--line);
   padding-top: 21px;
@@ -204,7 +204,7 @@ textarea {
   font: 17px Georgia;
   flex-shrink: 0;
 }
-.account strong {
+.local-space strong {
   font-size: 10px;
   display: block;
   max-width: 118px;
@@ -212,7 +212,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.account small {
+.local-space small {
   font-size: 9px;
   color: var(--muted);
   display: block;
@@ -344,16 +344,7 @@ p {
   gap: 16px;
   align-items: center;
 }
-.saved-select {
-  display: flex;
-  align-items: center;
-  font-size: 10px;
-}
-.saved-select select {
-  padding: 5px;
-  max-width: 170px;
-  font-size: 10px;
-}
+
 .event-hero {
   min-height: 295px;
   border-radius: 10px;
@@ -837,8 +828,7 @@ td input {
   max-width: 135px;
   padding: 9px;
 }
-.over,
-.danger {
+.over {
   color: #a14b37;
 }
 .footnote {
@@ -1286,9 +1276,6 @@ td input {
   .editable-task > input[type="date"] {
     width: 135px;
   }
-  .saved-select {
-    font-size: 0;
-  }
 }
 @media (max-width: 540px) {
   main {
@@ -1424,10 +1411,7 @@ td input {
   .event-controls .text-link svg {
     width: 18px;
   }
-  .saved-select select {
-    max-width: 110px;
-    font-size: 9px;
-  }
+
   .event-toolbar {
     gap: 8px;
   }
@@ -1532,7 +1516,7 @@ td input {
     margin-top: 10px;
     flex-wrap: wrap;
   }
-  .account strong {
+  .local-space strong {
     max-width: 140px;
   }
 }
@@ -1557,7 +1541,7 @@ td input {
 .category,
 .footnote,
 footer,
-.account small,
+.local-space small,
 .ai-label,
 .pill,
 .crumb,

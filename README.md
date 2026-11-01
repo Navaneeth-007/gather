@@ -4,10 +4,10 @@
 
 ### Big moments. Little details.
 
-A thoughtful GenAI planning assistant for weddings, birthdays, and community events.<br/>
-From the first idea to the final toast — budgets, timelines, vendors, and personal touches, together.
+A thoughtful GenAI planner for weddings, birthdays, and community events.<br/>
+Budgets, timelines, vendors, and personal touches — together.
 
-[**Open the live app ↗**](https://gather-promptwars-2026-8f31.web.app) · [Try the demo](#try-it-in-two-minutes) · [Setup guide](docs/SETUP.md) · [Architecture](docs/ARCHITECTURE.md)
+[**Open Gather ↗**](https://gather-promptwars-2026-8f31.web.app) · [Features](#features) · [Getting started](#getting-started)
 
 [![Checks](https://github.com/Navaneeth-007/gather/actions/workflows/check.yml/badge.svg)](https://github.com/Navaneeth-007/gather/actions/workflows/check.yml)
 ![React 19](https://img.shields.io/badge/React-19-244f43?style=flat-square)
@@ -16,9 +16,7 @@ From the first idea to the final toast — budgets, timelines, vendors, and pers
 ![Firebase Hosting](https://img.shields.io/badge/Firebase-Hosting-b58b54?style=flat-square)
 [![License: MIT](https://img.shields.io/badge/License-MIT-738565?style=flat-square)](LICENSE)
 
-![Gather event overview with a garden-inspired wedding plan, budget, progress and upcoming tasks](docs/screenshots/overview.jpg)
-
-**Built for Google Hack2Skill PromptWars.** Independent hackathon entry; not an official Google product.
+![Gather's event overview with a garden-inspired wedding plan, budget, progress and upcoming tasks](docs/screenshots/overview.jpg)
 
 </div>
 
@@ -28,35 +26,30 @@ A celebration begins with a feeling. Making it happen usually means scattered no
 
 Gather turns a short event brief into a structured, editable plan. Share the occasion, date, location, guest count, budget, and what matters to you. Gemini proposes a practical starting point; you stay in control of every amount, task, and detail.
 
-## What you can do
+## Features
 
-| Planning need | Gather's approach |
-| --- | --- |
-| **A plan that feels personal** | Gemini-generated ideas shaped by the event brief, preferences, dietary and accessibility needs. |
-| **A budget you can work with** | INR allocations, actual spending, remaining amounts, and clear over-budget warnings. |
-| **The next right step** | Editable task titles and dates, completion tracking, and a timeline sorted by due date. |
-| **A dependable celebration crew** | Vendor categories, research notes, and research → shortlist → booked status. |
-| **Your plans, your control** | Browser-local persistence and JSON export; optional account-based cloud saving. |
-| **Access on any screen** | Responsive layouts, labeled controls, keyboard focus, native dialogs, and reduced-motion support. |
+| Planning need                | Gather's approach                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Personal ideas**           | Gemini-generated suggestions shaped by your preferences, dietary needs, and accessibility requirements.   |
+| **Practical budgets**        | INR allocations, actual spending, remaining amounts, and over-budget warnings.                            |
+| **A clear next step**        | Editable tasks, due dates, completion tracking, and a sorted timeline.                                    |
+| **An organized shortlist**   | Vendor categories, notes, and research → shortlist → booked status.                                       |
+| **Your plans, your control** | Automatic saving on your device and JSON export.                                                          |
+| **Access on any screen**     | Responsive layouts, labeled controls, visible keyboard focus, native dialogs, and reduced-motion support. |
 
-## Try it in two minutes
+## Make it yours
 
-**No-key walkthrough:** [open Gather](https://gather-promptwars-2026-8f31.web.app), explore the sample wedding, change a budget amount, complete a task, and shortlist a vendor. The sample is clearly labeled and needs no account.
+1. Open [Gather](https://gather-promptwars-2026-8f31.web.app) and select **Add Gemini key**.
+2. Enter your own key from [Google AI Studio](https://aistudio.google.com/api-keys), then choose **Use my key**.
+3. Select **New event**, add your details, and choose **Create my plan with Gemini**.
+4. Review and edit the plan. Track spending, complete tasks, and shortlist vendors.
+5. Export a copy whenever you like. Use **AI connected → Remove key** to forget your key; reloading the page also clears it.
 
-**Personalized Gemini plan:**
-
-1. Select **Add Gemini key** and enter your own key from [Google AI Studio](https://aistudio.google.com/api-keys).
-2. Choose **Use my key**, then **New event**. Add your occasion, budget, guests, location, and preferences.
-3. Choose **Create my plan with Gemini**. Review and edit the returned plan, then export it.
-4. Use **AI connected → Remove key** when finished. A page reload also forgets the key.
-
-No Firebase sign-in or Blaze upgrade is required for this generation flow. Your key's Google API access, quotas and any charges still apply. A failed Gemini request keeps the existing plan intact.
-
-> **Key handling:** the visitor's key stays in page memory and travels directly to Google in a request header. It is not saved to browser storage, Firebase, source files, or exported plans. Browser-supplied keys are visible to the person using that browser; use your own key on a trusted device. Never put a shared operator key in a frontend bundle.
+You can explore a labeled sample plan without a key. No account is required.
 
 ## A closer look
 
-Screenshots below show the included **sample event**, captured from the deployed app. They demonstrate the interface, not a claimed live Gemini response. No real key appears in any image.
+Screenshots use Gather's included sample event.
 
 <table>
 <tr>
@@ -79,27 +72,30 @@ Screenshots below show the included **sample event**, captured from the deployed
 <img src="docs/screenshots/mobile.jpg" alt="Gather's responsive mobile overview" width="320"/>
 </details>
 
-## Built to be understandable
+## How it works
 
 ```mermaid
 flowchart LR
-  Visitor[Event brief + visitor's key] --> App[React + TypeScript]
-  App -->|Direct HTTPS / key in header| Gemini[Google Gemini]
+  Brief[Your event brief] --> App[React + TypeScript]
+  Key[Your Gemini key / page memory] --> App
+  App -->|Direct HTTPS request| Gemini[Google Gemini]
   Gemini -->|Structured JSON| Validate[Zod validation]
   Validate --> Plan[Editable event plan]
-  Plan --> Local[Browser-local storage]
+  Plan --> Local[Local browser storage]
   Plan --> Export[JSON export]
-  Plan -. Optional sign-in + explicit save .-> Firebase[Firebase Auth + Firestore]
-  Hosting[Firebase Hosting] -->|Static application| App
 ```
 
-**React 19 · Vite · TypeScript · Zod · Gemini API · Firebase · Lucide**
+**React 19 · Vite · TypeScript · Zod · Gemini API · Lucide · Firebase Hosting**
 
-Model output is parsed and validated before replacing a plan: malformed structures, duplicate IDs, over-budget allocations, and dates outside the planning window are rejected. Errors are readable and do not expose upstream payloads or credentials. The interface uses escaped React text, not generated HTML.
+A shared schema validates event details, saved records, and generated plans. Budget totals, duplicate IDs, and task dates are checked before a result replaces your plan. Failed requests preserve the existing plan. Generated text is rendered through React, and the interface is built with compact CSS artwork and SVG icons.
 
-[Read the architecture and data flow →](docs/ARCHITECTURE.md)
+### Your key and your data
 
-## Run locally
+The key stays in page memory and is sent directly to Google in a request header. It is not saved to browser storage, source files, or exported plans. Browser-entered keys are visible on that device; use your own key on a trusted browser. Google API access, quotas, and any charges belong to your key's project.
+
+Plans are stored locally on your device. Avoid sensitive guest details and export a copy before clearing browser data. Vendor entries are research categories, and prices are planning estimates.
+
+## Getting started
 
 Use **Node 22+** and npm.
 
@@ -110,59 +106,25 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. Local samples and visitor-key generation need no `.env` file. For the full validation suite, install the optional server dependencies too:
+Open the local URL printed by Vite. No environment file is needed; enter your Gemini key in the app when you want a personalized plan. You can change the model in AI settings if your key has access to a different Gemini model.
+
+| Command           | Purpose                                 |
+| ----------------- | --------------------------------------- |
+| `npm run dev`     | Start local development                 |
+| `npm test`        | Run the app and validation tests        |
+| `npm run build`   | Type-check and build the production app |
+| `npm run preview` | Preview the production build locally    |
+| `npm run check`   | Run tests and the production build      |
+
+## Hosting
+
+Gather is a static application hosted on Firebase Hosting. To publish it to the project selected in `.firebaserc`:
 
 ```sh
-npm --prefix functions ci
-npm run check
-npm run check:repo
+npm run build
+firebase deploy --only hosting
 ```
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Local development server |
-| `npm test` | Schema, UI, Gemini-client privacy and failure tests |
-| `npm run build` | Strict TypeScript checks and production frontend build |
-| `npm run check` | Tests, frontend build, and optional Function build |
-| `npm run check:repo` | Enforce the submission's 10 MB tracked-file limit |
-| `npm run test:rules` | Firestore rules tests with Java 21+ and Firebase emulators |
+The deployment includes security headers and a content policy that allows API requests to the Gemini endpoint.
 
-[Configuration, optional cloud saving, and deployment →](docs/SETUP.md)
-
-## Current delivery status
-
-| Component | Status |
-| --- | --- |
-| Responsive interface and local planning | Live on Firebase Hosting |
-| Visitor-key Gemini generation | Implemented; request/response and failure paths tested with mocks |
-| Automated app and validation tests | 14 passing in the latest local run; CI runs on pushes and pull requests |
-| Frontend and optional Function builds | Passing locally |
-| Firestore database, owner rules, and indexes | Created and deployed |
-| Google sign-in and cloud saving | Optional; requires Auth configuration and integration verification |
-| Server-key Firebase Function | Alternative implementation retained; not used by the current UI or deployed |
-| Firestore rules emulator suite | Included; needs Java 21+ and has not been verified locally |
-
-A live Gemini request requires your own working key. The default model can be changed in AI settings if availability differs for your account. Vendor entries are categories to research, prices are estimates, and Gather does not book or pay suppliers.
-
-## Submission and demo
-
-Source, lockfiles, and compressed screenshots fit comfortably below the **10 MB repository limit**. Dependencies, builds, environment files, and emulator data are ignored. Run `npm run check:repo` before submitting.
-
-For a recording, follow the [two-minute demo storyboard](docs/DEMO.md). Hide your API key during entry and never show it in screenshots or Git history. Submit this **public repository** and an accessible unlisted video link according to the event's instructions.
-
-## Project map
-
-```text
-src/                    React interface, local sample, direct Gemini client
-shared/                 Typed event contracts and validation
-functions/              Optional server-key Firebase Function alternative
-tests/                  UI, schema, Gemini-client and Firestore rule tests
-docs/screenshots/       Screenshots of the live sample experience
-docs/                   Setup, architecture, and demo storyboard
-scripts/                Submission size check
-.github/                CI, issue form, and pull-request template
-firestore.rules         Owner-isolated event access
-firebase.json           Hosting, security headers, and emulator configuration
-```
-
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Verification details](VERIFICATION.md) · [MIT license](LICENSE)
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [MIT license](LICENSE)

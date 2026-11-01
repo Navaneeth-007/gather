@@ -1,13 +1,6 @@
-import React from "react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-vi.mock("../src/firebase", () => ({
-  auth: null,
-  db: null,
-  functions: null,
-  configured: false,
-}));
 import App from "../src/App";
 beforeEach(() => {
   localStorage.clear();
@@ -64,7 +57,7 @@ describe("planner interactions", () => {
     expect(screen.getByText("SAMPLE PLAN")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Sample plan");
   });
-  it("recovers corrupt local data and offers key setup without sign-in", async () => {
+  it("recovers corrupt local data and offers key setup without an account", async () => {
     localStorage.setItem("gather-demo", "broken");
     render(<App />);
     expect(
@@ -77,7 +70,7 @@ describe("planner interactions", () => {
   });
 });
 
-it("uses a memory-only key without sign-in and can remove it", async () => {
+it("uses a memory-only key without an account and can remove it", async () => {
   const u = userEvent.setup();
   const secret = "test_only_key_12345678901234567890";
   const { demoEvent } = await import("../src/demo");

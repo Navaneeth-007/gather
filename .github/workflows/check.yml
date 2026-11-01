@@ -11,10 +11,5 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            functions/package-lock.json
       - run: npm ci
-      - run: npm --prefix functions ci
       - run: npm run check
-      - run: npm run check:repo

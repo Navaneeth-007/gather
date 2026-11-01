@@ -8,7 +8,6 @@ import {
   Download,
   Flower2,
   LayoutDashboard,
-  LogOut,
   MapPin,
   Menu,
   Plus,
@@ -22,21 +21,6 @@ import {
   Sun,
   LoaderCircle,
 } from "lucide-react";
-import {
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
-  signOut,
-  type User,
-} from "firebase/auth";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  setDoc,
-} from "firebase/firestore";
-import { auth, db } from "./firebase";
 import {
   briefSchema,
   eventSchema,
@@ -74,13 +58,6 @@ function readLocal() {
   }
 }
 function errorText(e: unknown) {
-  const code = (e as { code?: string })?.code;
-  if (code?.includes("popup-closed"))
-    return "Sign-in was cancelled. You can try again.";
-  if (code?.includes("permission-denied"))
-    return "Access was denied. Check your sign-in and Firebase rules.";
-  if (code?.includes("resource-exhausted"))
-    return "Generation limit reached. Wait a moment, or try again tomorrow.";
   return e instanceof Error
     ? e.message
     : "Something went wrong. Please try again.";
@@ -92,70 +69,23 @@ export default function App() {
   const [model, setModel] = useState("gemini-2.5-flash");
   const [event, setEvent] = useState<EventData>(readLocal);
   const [tab, setTab] = useState("Overview");
-  const [user, setUser] = useState<User | null>(null);
-  const [events, setEvents] = useState<{ id: string; data: EventData }[]>([]);
-  const [eventId, setEventId] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
   const [brief, setBrief] = useState<Brief>(initialBrief);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [mobile, setMobile] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [lastSaved, setLastSaved] = useState<string | null>(null);
-  const [ready, setReady] = useState(!auth);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const loadVersion = useRef(0);
   useEffect(() => {
-    if (!auth) return;
-    return onAuthStateChanged(auth, (u) => {
-      loadVersion.current++;
-      setUser(u);
-      setEvents([]);
-      setEventId(null);
-      setLastSaved(null);
-      setSaved(false);
-      setEvent(readLocal());
-      setReady(true);
-    });
-  }, []);
-  useEffect(() => {
-    if (!user || !db) return;
-    let active = true;
-    getDocs(collection(db, "users", user.uid, "events"))
-      .then((s) => {
-        if (!active) return;
-        const all = s.docs
-          .flatMap((d) => {
-            const parsed = eventSchema.safeParse(d.data());
-            return parsed.success ? [{ id: d.id, data: parsed.data }] : [];
-          })
-          .sort((a, b) => b.data.updatedAt - a.data.updatedAt);
-        setEvents(all);
-        if (all[0]) {
-          setEvent(all[0].data);
-          setEventId(all[0].id);
-          setLastSaved(JSON.stringify(all[0].data));
-          setSaved(true);
-        }
-      })
-      .catch((e) => active && setError(errorText(e)));
-    return () => {
-      active = false;
-    };
-  }, [user]);
-  useEffect(() => {
-    if (!user) {
-      try {
-        localStorage.setItem("gather-demo", JSON.stringify(event));
-      } catch {
-        setError(
-          "Local storage is full or unavailable. Export your plan to keep a copy.",
-        );
-      }
+    try {
+      localStorage.setItem("gather-demo", JSON.stringify(event));
+    } catch {
+      setError(
+        "Local storage is full or unavailable. Export your plan to keep a copy.",
+      );
     }
-  }, [event, user]);
+  }, [event]);
   useEffect(() => {
     if (modal) {
       dialog.current?.showModal();
@@ -179,7 +109,6 @@ export default function App() {
   );
   function changePlan(p: Plan) {
     setEvent((e) => ({ ...e, plan: p, updatedAt: Date.now() }));
-    setSaved(false);
   }
   function openNew() {
     setBrief({
@@ -211,7 +140,6 @@ export default function App() {
       return;
     }
     setBusy(true);
-    const version = loadVersion.current;
     try {
       let next: EventData;
       if (keyConnected) {
@@ -229,105 +157,14 @@ export default function App() {
       } else {
         next = demoEvent(parsed.data);
       }
-      if (version !== loadVersion.current) return;
       setEvent(next);
-      setEventId(null);
-      setSaved(false);
-      setLastSaved(null);
       setTab("Overview");
       setModal(false);
       setNotice(
         next.source === "gemini"
-          ? "Your personalized Gemini plan is ready. Changes are kept in this browser; export a copy or save to your account."
+          ? "Your personalized Gemini plan is ready. Changes are kept in this browser; export a copy to keep it."
           : "Sample plan created locally. Add your own Gemini key in AI settings for a personalized plan.",
       );
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function login() {
-    if (!auth) {
-      setNotice(
-        "You’re in local demo mode. Follow README setup to connect Firebase and enable Google sign-in.",
-      );
-      return;
-    }
-    setError("");
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-      setNotice("Signed in. Your plans can now be saved securely.");
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }
-  async function save() {
-    if (!user || !db) {
-      setNotice(
-        "Demo changes are saved on this browser. Export a copy, or connect Firebase to save to an account.",
-      );
-      return;
-    }
-    const uid = user.uid;
-    const version = loadVersion.current;
-    setBusy(true);
-    setError("");
-    try {
-      const data = eventSchema.parse(event);
-      const ref = eventId
-        ? doc(db, "users", uid, "events", eventId)
-        : doc(collection(db, "users", uid, "events"));
-      await setDoc(ref, data);
-      if (version !== loadVersion.current) return;
-      setEventId(ref.id);
-      setLastSaved(JSON.stringify(data));
-      setSaved(true);
-      setEvents((all) => [
-        { id: ref.id, data },
-        ...all.filter((x) => x.id !== ref.id),
-      ]);
-      setNotice("Plan saved to your account.");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  function selectEvent(id: string) {
-    const item = events.find((e) => e.id === id);
-    if (item) {
-      if (
-        lastSaved !== JSON.stringify(event) &&
-        !window.confirm(
-          "Switch plans? Export or save your current edits first.",
-        )
-      )
-        return;
-      setEvent(item.data);
-      setEventId(id);
-      setLastSaved(JSON.stringify(item.data));
-      setSaved(true);
-      setTab("Overview");
-    }
-  }
-  async function remove() {
-    if (
-      !user ||
-      !db ||
-      !eventId ||
-      !window.confirm("Permanently delete this saved event?")
-    )
-      return;
-    setBusy(true);
-    try {
-      await deleteDoc(doc(db, "users", user.uid, "events", eventId));
-      setEvents((all) => all.filter((x) => x.id !== eventId));
-      setEventId(null);
-      setLastSaved(null);
-      setEvent(demoEvent());
-      setSaved(false);
-      setNotice("Saved event deleted.");
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -396,25 +233,14 @@ export default function App() {
             Plan something new <ArrowUpRight size={16} />
           </button>
         </div>
-        <div className="account">
-          <div className="avatar">{user?.displayName?.slice(0, 1) || "Y"}</div>
-          <div>
-            <strong>{user?.displayName || "Your creative space"}</strong>
-            <small>
-              {user ? "Personal account" : "Local plans · no sign-in"}
-            </small>
+        <div className="local-space">
+          <div className="avatar">
+            <Flower2 size={19} />
           </div>
-          {user && (
-            <button
-              aria-label="Sign out"
-              className="icon"
-              onClick={() => {
-                void signOut(auth!).catch((e) => setError(errorText(e)));
-              }}
-            >
-              <LogOut size={17} />
-            </button>
-          )}
+          <div>
+            <strong>Your creative space</strong>
+            <small>Plans saved on this device</small>
+          </div>
         </div>
       </aside>
       <div className="body">
@@ -446,16 +272,10 @@ export default function App() {
             </span>
             <button
               className="button small"
-              disabled={!ready || busy}
-              onClick={user ? save : auth ? login : exportPlan}
+              disabled={busy}
+              onClick={exportPlan}
             >
-              {user
-                ? saved
-                  ? "Saved ✓"
-                  : "Save plan"
-                : auth
-                  ? "Sign in"
-                  : "Export"}
+              Export
               <ArrowUpRight size={14} />
             </button>
           </div>
@@ -543,7 +363,7 @@ export default function App() {
                 </a>
                 . It is held only in memory until you remove it or reload this
                 page, and sent directly to Google with your event details. It is
-                never saved in browser storage, exported plans, or Firebase.
+                never saved in browser storage or exported plans.
               </p>
               <p>
                 Browser keys are visible to the person using this browser. Use
@@ -647,25 +467,6 @@ export default function App() {
               </span>
             </div>
             <div className="event-controls">
-              {events.length > 0 && (
-                <label className="saved-select">
-                  Saved events{" "}
-                  <select
-                    aria-label="Open saved event"
-                    value={eventId || ""}
-                    onChange={(e) => selectEvent(e.target.value)}
-                  >
-                    <option value="" disabled>
-                      Unsaved event
-                    </option>
-                    {events.map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.data.brief.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <button className="text-link" onClick={exportPlan}>
                 <Download size={15} />
                 Export plan
@@ -1187,15 +988,6 @@ export default function App() {
               {event.source === "demo"
                 ? "Local sample · Gemini not connected to this plan"
                 : "AI-assisted · Review details before booking"}
-              {user && eventId && (
-                <button
-                  className="text-link danger"
-                  disabled={busy}
-                  onClick={remove}
-                >
-                  Delete event
-                </button>
-              )}
             </span>
           </footer>
         </main>
@@ -1328,7 +1120,7 @@ export default function App() {
           <p className="footnote">
             {keyConnected
               ? "Your key and these event details will be sent directly to Google Gemini. Usage applies to your own API quota. Avoid sensitive personal information."
-              : "No Gemini key is connected. This creates a local sample. Add your own key in AI settings for a personalized Gemini plan; no sign-in is required."}{" "}
+              : "No Gemini key is connected. This creates a local sample. Add your own key in AI settings for a personalized Gemini plan; no account is required."}{" "}
             Creating a plan replaces the current view; save or export edits
             first.
           </p>
