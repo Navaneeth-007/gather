@@ -1591,3 +1591,26 @@ footer,
     gap: 15px;
   }
 }
+
+.automatic-model {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 15px;
+  background: #edf0e7;
+  border-radius: 7px;
+}
+.automatic-model > span {
+  font-size: 11px;
+  font-weight: 600;
+  color: #65715e;
+}
+.automatic-model strong {
+  font-size: 13px;
+  margin-top: 9px;
+  overflow-wrap: anywhere;
+}
+.automatic-model p {
+  font-size: 11px;
+  margin: 8px 0 0;
+}

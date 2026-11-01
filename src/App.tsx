@@ -30,12 +30,10 @@ import {
 } from "../shared/schema";
 import { demoEvent, initialBrief } from "./demo";
 import {
-  generateWithOwnKey,
+  generateWithAutomaticModel,
+  connectAutomaticModel,
   validKey,
-  validModel,
   normalizeKey,
-  listGeminiModels,
-  chooseAvailableModel,
 } from "./gemini";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -73,8 +71,8 @@ export default function App() {
   const apiKey = useRef("");
   const [keyConnected, setKeyConnected] = useState(false);
   const [keyPanel, setKeyPanel] = useState(false);
-  const [model, setModel] = useState("gemini-2.5-flash");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [model, setModel] = useState("");
+  const [connectionProgress, setConnectionProgress] = useState("");
   const [event, setEvent] = useState<EventData>(readLocal);
   const [tab, setTab] = useState("Overview");
   const [modal, setModal] = useState(false);
@@ -151,17 +149,18 @@ export default function App() {
     try {
       let next: EventData;
       if (keyConnected) {
-        const plan = await generateWithOwnKey(
+        const generated = await generateWithAutomaticModel(
           apiKey.current,
           model,
           parsed.data,
         );
         next = {
           brief: parsed.data,
-          plan,
+          plan: generated.plan,
           source: "gemini",
           updatedAt: Date.now(),
         };
+        setModel(generated.model);
       } else {
         next = demoEvent(parsed.data);
       }
@@ -384,15 +383,6 @@ export default function App() {
                   const form = e.currentTarget;
                   const data = new FormData(form);
                   const key = normalizeKey(String(data.get("geminiKey") || ""));
-                  const chosenModel = String(
-                    data.get("geminiModel") || "",
-                  ).trim();
-                  if (!validModel(chosenModel)) {
-                    setError(
-                      "Enter a Gemini model name, such as gemini-2.5-flash.",
-                    );
-                    return;
-                  }
                   if (!keyConnected && !validKey(key)) {
                     setError(
                       "Paste the complete Gemini key without spaces or line breaks.",
@@ -410,11 +400,9 @@ export default function App() {
                   setBusy(true);
                   try {
                     const checkedKey = key || apiKey.current;
-                    const available = await listGeminiModels(checkedKey);
-                    setAvailableModels(available);
-                    const selected = chooseAvailableModel(
-                      chosenModel,
-                      available,
+                    const selected = await connectAutomaticModel(
+                      checkedKey,
+                      setConnectionProgress,
                     );
                     apiKey.current = checkedKey;
                     setKeyConnected(true);
@@ -422,12 +410,13 @@ export default function App() {
                     form.reset();
                     setKeyPanel(false);
                     setNotice(
-                      `Key verified with Google. Using ${selected}. Create a new event to generate your plan.`,
+                      `Connected with ${selected}. Your model was selected automatically.`,
                     );
                   } catch (error) {
                     setError(errorText(error));
                   } finally {
                     setBusy(false);
+                    setConnectionProgress("");
                   }
                 }}
               >
@@ -452,28 +441,24 @@ export default function App() {
                       disabled={busy}
                     />
                   </label>
-                  <label>
-                    Gemini model
-                    <input
-                      name="geminiModel"
-                      list="available-gemini-models"
-                      defaultValue={model}
-                      required
-                      maxLength={88}
-                      disabled={busy}
-                    />
-                    <datalist id="available-gemini-models">
-                      {availableModels.map((name) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
-                  </label>
+                  <div className="automatic-model">
+                    <span>Model selection</span>
+                    <strong>{model || "Automatic"}</strong>
+                    <p>
+                      Gather tests available models and chooses one that
+                      responds. No model name needed.
+                    </p>
+                  </div>
                 </div>
                 <p className="footnote">
-                  Adding your key checks it with Google and loads available text
-                  models. Free-tier quota depends on your Google project and
-                  model.
+                  Connecting runs a small test using your API quota. Free-tier
+                  availability depends on your Google project.
                 </p>
+                {connectionProgress && (
+                  <p role="status" className="footnote">
+                    {connectionProgress}
+                  </p>
+                )}
                 <div className="key-actions">
                   <button className="button primary" disabled={busy}>
                     {busy ? "Checking key…" : "Use my key"}
@@ -486,7 +471,7 @@ export default function App() {
                       onClick={() => {
                         apiKey.current = "";
                         setKeyConnected(false);
-                        setAvailableModels([]);
+                        setModel("");
                         setKeyPanel(false);
                         setNotice("Gemini key removed from this tab.");
                       }}

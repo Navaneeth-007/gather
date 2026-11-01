@@ -4,7 +4,8 @@ import {
   validKey,
   normalizeKey,
   listGeminiModels,
-  chooseAvailableModel,
+  connectAutomaticModel,
+  generateWithAutomaticModel,
 } from "../src/gemini";
 import { demoEvent, initialBrief } from "../src/demo";
 const key = "test_only_key_12345678901234567890";
@@ -143,17 +144,6 @@ describe("key verification and model discovery", () => {
     expect(options.referrerPolicy).toBe("strict-origin-when-cross-origin");
     expect(options.body).toBeUndefined();
   });
-  it("uses only advertised model names and rejects an unavailable custom choice", () => {
-    expect(chooseAvailableModel("gemini-2.5-flash", ["gemini-2.5-flash"])).toBe(
-      "gemini-2.5-flash",
-    );
-    expect(chooseAvailableModel("gemini-old", ["gemini-3.5-flash-lite"])).toBe(
-      "gemini-3.5-flash-lite",
-    );
-    expect(() =>
-      chooseAvailableModel("gemini-old", ["gemini-pro-only"]),
-    ).toThrow("unavailable");
-  });
   it("explains key and website restrictions without exposing upstream errors", async () => {
     for (const [reason, expected] of [
       ["API_KEY_INVALID", "Google rejected this API key"],
@@ -162,15 +152,13 @@ describe("key verification and model discovery", () => {
     ]) {
       vi.stubGlobal(
         "fetch",
-        vi
-          .fn()
-          .mockResolvedValue({
-            ok: false,
-            status: 403,
-            json: async () => ({
-              error: { message: key, details: [{ reason }] },
-            }),
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 403,
+          json: async () => ({
+            error: { message: key, details: [{ reason }] },
           }),
+        }),
       );
       try {
         await listGeminiModels(key);
@@ -181,4 +169,155 @@ describe("key verification and model discovery", () => {
       }
     }
   });
+});
+
+describe("automatic model selection", () => {
+  const listing = (names: string[]) => ({
+    ok: true,
+    json: async () => ({
+      models: names.map((name) => ({
+        name: "models/" + name,
+        supportedGenerationMethods: ["generateContent"],
+      })),
+    }),
+  });
+  const probe = {
+    ok: true,
+    json: async () => ({
+      candidates: [
+        { content: { parts: [{ text: '{"ok":true}' }] }, finishReason: "STOP" },
+      ],
+    }),
+  };
+  it("tests a model before connecting and skips one without quota", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const path = String(url);
+        calls.push(path);
+        if (path.includes("/models?"))
+          return listing(["gemini-2.5-flash-lite", "gemini-3.5-flash-lite"]);
+        if (path.includes("gemini-3.5")) return { ok: false, status: 429 };
+        return probe;
+      }),
+    );
+    expect(await connectAutomaticModel(key)).toBe("gemini-2.5-flash-lite");
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toContain("gemini-3.5-flash-lite");
+  });
+  it("does not retry an invalid or blocked key against other models", async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(
+        listing(["gemini-3.5-flash-lite", "gemini-2.5-flash"]),
+      )
+      .mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { details: [{ reason: "API_KEY_INVALID" }] },
+        }),
+      });
+    vi.stubGlobal("fetch", f);
+    await expect(connectAutomaticModel(key)).rejects.toThrow(
+      "Google rejected this API key",
+    );
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+  it("limits model tests and never reports a connection if all fail", async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(
+        listing(
+          Array.from({ length: 10 }, (_, i) => "gemini-3.0-flash-lite-" + i),
+        ),
+      )
+      .mockResolvedValue({ ok: false, status: 429 });
+    vi.stubGlobal("fetch", f);
+    await expect(connectAutomaticModel(key)).rejects.toThrow(
+      "none of the tested models",
+    );
+    expect(f).toHaveBeenCalledTimes(5);
+  });
+  it("rejects a successful HTTP response that cannot produce structured output", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(listing(["gemini-2.5-flash"]))
+        .mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            candidates: [{ content: { parts: [{ text: "not json" }] } }],
+          }),
+        }),
+    );
+    await expect(connectAutomaticModel(key)).rejects.toThrow(
+      "none of the tested models",
+    );
+  });
+  it("switches models during planning if the connected model disappears", async () => {
+    const plan = demoEvent(brief).plan;
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce(listing(["gemini-2.5-flash-lite"]))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: { parts: [{ text: JSON.stringify(plan) }] },
+              finishReason: "STOP",
+            },
+          ],
+        }),
+      });
+    vi.stubGlobal("fetch", f);
+    expect(
+      await generateWithAutomaticModel(key, "gemini-old-flash", brief),
+    ).toEqual({ model: "gemini-2.5-flash-lite", plan });
+    expect(f).toHaveBeenCalledTimes(3);
+  });
+});
+
+it("tries Flash as well as Flash-Lite instead of spending every attempt on older variants", async () => {
+  const paths: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url) => {
+      const path = String(url);
+      paths.push(path);
+      if (path.includes("/models?"))
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              "gemini-3.5-flash-lite",
+              "gemini-3.1-flash-lite",
+              "gemini-2.5-flash-lite",
+              "gemini-3.8-flash",
+            ].map((name) => ({
+              name: "models/" + name,
+              supportedGenerationMethods: ["generateContent"],
+            })),
+          }),
+        };
+      if (path.includes("flash-lite")) return { ok: false, status: 429 };
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: { parts: [{ text: '{"ok":true}' }] },
+              finishReason: "STOP",
+            },
+          ],
+        }),
+      };
+    }),
+  );
+  expect(await connectAutomaticModel(key)).toBe("gemini-3.8-flash");
+  expect(paths).toHaveLength(3);
 });

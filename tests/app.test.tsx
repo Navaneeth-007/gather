@@ -67,6 +67,8 @@ describe("planner interactions", () => {
       screen.getByRole("button", { name: "Add Gemini key" }),
     );
     expect(screen.getByLabelText("Gemini API key")).toBeTruthy();
+    expect(screen.queryByLabelText("Gemini model")).toBeNull();
+    expect(screen.getByText("Automatic", { exact: true })).toBeTruthy();
   });
 });
 
@@ -90,6 +92,18 @@ it("uses a memory-only key without an account and can remove it", async () => {
           }),
         };
       const body = JSON.parse(String(init.body));
+      if (body.generationConfig.responseJsonSchema.properties.ok)
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: { parts: [{ text: '{"ok":true}' }] },
+                finishReason: "STOP",
+              },
+            ],
+          }),
+        };
       const brief = JSON.parse(body.contents[0].parts[0].text);
       return {
         ok: true,
@@ -133,21 +147,36 @@ it("retains the existing plan when Gemini rejects a request", async () => {
   const u = userEvent.setup();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url) =>
-      String(url).includes("/models?")
-        ? {
-            ok: true,
-            json: async () => ({
-              models: [
-                {
-                  name: "models/gemini-2.5-flash",
-                  supportedGenerationMethods: ["generateContent"],
-                },
-              ],
-            }),
-          }
-        : { ok: false, status: 403 },
-    ),
+    vi.fn(async (url, init) => {
+      if (String(url).includes("/models?"))
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                name: "models/gemini-2.5-flash",
+                supportedGenerationMethods: ["generateContent"],
+              },
+            ],
+          }),
+        };
+      if (
+        JSON.parse(String(init.body)).generationConfig.responseJsonSchema
+          .properties.ok
+      )
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: { parts: [{ text: '{"ok":true}' }] },
+                finishReason: "STOP",
+              },
+            ],
+          }),
+        };
+      return { ok: false, status: 403 };
+    }),
   );
   render(<App />);
   await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
@@ -166,7 +195,7 @@ it("retains the existing plan when Gemini rejects a request", async () => {
   );
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain(
-      "Google denied access",
+      "none of the tested models",
     ),
   );
   expect(JSON.parse(localStorage.getItem("gather-demo")!).brief.name).toBe(
@@ -177,19 +206,32 @@ it("retains the existing plan when Gemini rejects a request", async () => {
 it("accepts a long punctuation-containing key and selects an available model", async () => {
   const u = userEvent.setup();
   const secret = "test.auth." + "x".repeat(260);
-  const fetcher = vi
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        models: [
-          {
-            name: "models/gemini-3.5-flash-lite",
-            supportedGenerationMethods: ["generateContent"],
+  const fetcher = vi.fn(
+    async (url, _options: { headers: Record<string, string> }) =>
+      String(url).includes("/models?")
+        ? {
+            ok: true,
+            json: async () => ({
+              models: [
+                {
+                  name: "models/gemini-3.5-flash-lite",
+                  supportedGenerationMethods: ["generateContent"],
+                },
+              ],
+            }),
+          }
+        : {
+            ok: true,
+            json: async () => ({
+              candidates: [
+                {
+                  content: { parts: [{ text: '{"ok":true}' }] },
+                  finishReason: "STOP",
+                },
+              ],
+            }),
           },
-        ],
-      }),
-    });
+  );
   vi.stubGlobal("fetch", fetcher);
   render(<App />);
   await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
@@ -209,15 +251,13 @@ it("keeps invalid server-rejected keys disconnected without echoing credentials"
   const secret = "test.auth.key_123456789";
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({
-          error: { message: secret, details: [{ reason: "API_KEY_INVALID" }] },
-        }),
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: { message: secret, details: [{ reason: "API_KEY_INVALID" }] },
       }),
+    }),
   );
   render(<App />);
   await u.click(screen.getByRole("button", { name: "Add Gemini key" }));

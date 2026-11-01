@@ -20,7 +20,18 @@ export const validKey = (key: string) =>
 export const validModel = (model: string) =>
   /^gemini-[a-zA-Z0-9.-]{1,80}$/.test(model);
 
+class GeminiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly retryAnotherModel = false,
+  ) {
+    super(message);
+  }
+}
+
 async function googleError(response: Response): Promise<Error> {
+  const failure = (message: string, retryAnotherModel = false) =>
+    new GeminiRequestError(message, retryAnotherModel);
   let payload: {
     error?: { message?: string; details?: { reason?: string }[] };
   } = {};
@@ -36,7 +47,7 @@ async function googleError(response: Response): Promise<Error> {
       ? payload.error.message.toLowerCase()
       : "";
   if (message.includes("leaked"))
-    return new Error(
+    return failure(
       "Google has blocked this key because it was reported as leaked. Create a new key in Google AI Studio.",
     );
   if (
@@ -44,37 +55,35 @@ async function googleError(response: Response): Promise<Error> {
     reasons.includes("API_KEY_EXPIRED") ||
     message.includes("api key not valid")
   )
-    return new Error(
+    return failure(
       "Google rejected this API key. Copy the complete key from Google AI Studio, without its label or surrounding quotes.",
     );
   if (reasons.includes("API_KEY_HTTP_REFERRER_BLOCKED"))
-    return new Error(
+    return failure(
       "Your key blocks this website. Allow this site in the key’s website restrictions in Google Cloud.",
     );
   if (
     reasons.includes("API_KEY_SERVICE_BLOCKED") ||
     reasons.includes("SERVICE_DISABLED")
   )
-    return new Error(
+    return failure(
       "This key cannot access the Gemini API. Check its Generative Language API restrictions and project access in Google AI Studio.",
     );
   if (response.status === 429)
-    return new Error(
-      "Your selected model’s Gemini quota is exhausted or requests are too frequent. Check this project’s free-tier limits in Google AI Studio, or select another model with available quota.",
+    return failure(
+      "Gemini quota is exhausted or requests are too frequent. Check this project’s free-tier limits in Google AI Studio.",
+      true,
     );
   if (response.status === 401 || response.status === 403)
-    return new Error(
+    return failure(
       "Google denied access. Check your API key, website/API restrictions, and Gemini access in AI Studio.",
+      response.status === 403,
     );
   if (response.status === 404)
-    return new Error(
-      "That Gemini model is unavailable for your key. Reconnect your key to refresh the available models.",
-    );
+    return failure("That Gemini model is unavailable for your key.", true);
   if (response.status === 400)
-    return new Error(
-      "Google rejected the request. Check the selected model and its supported features in Google AI Studio.",
-    );
-  return new Error("Gemini is temporarily unavailable. Please try again.");
+    return failure("Google rejected this model’s request format.", true);
+  return failure("Gemini is temporarily unavailable. Please try again.", true);
 }
 
 async function requestGoogle(
@@ -158,21 +167,133 @@ export async function listGeminiModels(key: string): Promise<string[]> {
   return [...models].sort();
 }
 
-export function chooseAvailableModel(
-  preferred: string,
-  available: string[],
-): string {
-  if (available.includes(preferred)) return preferred;
-  const fallback = [
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-2.5-flash",
-  ].find((name) => available.includes(name));
-  if (fallback) return fallback;
-  throw new Error(
-    "The selected model is unavailable. Choose a model from the suggestions in AI settings.",
+function rankedModels(available: string[]): string[] {
+  const version = (name: string) => {
+    const match = name.match(/^gemini-(\d+)(?:\.(\d+))?/);
+    return match ? Number(match[1]) * 100 + Number(match[2] || 0) : 0;
+  };
+  const family = (name: string) =>
+    /flash-lite/.test(name) ? 0 : /flash/.test(name) ? 1 : 2;
+  const preview = (name: string) =>
+    /preview|experimental|(?:^|-)exp|latest/.test(name) ? 1 : 0;
+  const sorted = [...new Set(available)]
+    .filter(validModel)
+    .sort(
+      (a, b) =>
+        family(a) - family(b) ||
+        preview(a) - preview(b) ||
+        version(b) - version(a) ||
+        a.localeCompare(b),
+    );
+  const lite = sorted.filter((name) => /flash-lite/.test(name));
+  const flash = sorted.filter(
+    (name) => /flash/.test(name) && !/flash-lite/.test(name),
   );
+  const preferred = [lite[0], flash[0], lite[1], flash[1]].filter(
+    (name): name is string => !!name,
+  );
+  return [...preferred, ...sorted.filter((name) => !preferred.includes(name))];
+}
+
+const MAX_MODEL_ATTEMPTS = 4;
+function noWorkingModel() {
+  return new Error(
+    "Google accepted your key, but none of the tested models could complete a request. Check your project’s model access and available quota in Google AI Studio, then try again.",
+  );
+}
+function canTryAnotherModel(error: unknown) {
+  return error instanceof GeminiRequestError && error.retryAnotherModel;
+}
+
+/** A small real structured-output request verifies access beyond the model listing. */
+export async function connectAutomaticModel(
+  key: string,
+  onProgress: (message: string) => void = () => {},
+): Promise<string> {
+  onProgress("Checking your key…");
+  const deadline = Date.now() + 75000;
+  const available = await listGeminiModels(key);
+  const candidates = rankedModels(available).slice(0, MAX_MODEL_ATTEMPTS);
+  for (let index = 0; index < candidates.length; index++) {
+    onProgress(`Finding a working model (${index + 1}/${candidates.length})…`);
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) break;
+    try {
+      const data = await requestGoogle(
+        key,
+        `models/${encodeURIComponent(candidates[index])}:generateContent`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            contents: [
+              { role: "user", parts: [{ text: 'Reply with {"ok":true}.' }] },
+            ],
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseJsonSchema: {
+                type: "object",
+                properties: { ok: { type: "boolean" } },
+                required: ["ok"],
+                additionalProperties: false,
+              },
+              maxOutputTokens: 1024,
+            },
+          }),
+        },
+        Math.min(20000, remaining),
+      );
+      const candidate = data.candidates?.[0];
+      const text = candidate?.content?.parts
+        ?.filter((p: { text?: unknown }) => typeof p.text === "string")
+        .map((p: { text: string }) => p.text)
+        .join("");
+      let usable = false;
+      try {
+        usable =
+          candidate?.finishReason !== "MAX_TOKENS" &&
+          JSON.parse(text || "").ok === true;
+      } catch {
+        /* A malformed probe is not a successful connection. */
+      }
+      if (usable) return candidates[index];
+    } catch (error) {
+      if (!canTryAnotherModel(error)) throw error;
+    }
+  }
+  throw noWorkingModel();
+}
+
+/** Rechecks alternatives only after a model-specific access, quota, or server failure. */
+export async function generateWithAutomaticModel(
+  key: string,
+  selected: string,
+  input: Brief,
+): Promise<{ model: string; plan: Plan }> {
+  const deadline = Date.now() + 90000;
+  try {
+    return {
+      model: selected,
+      plan: await generateWithOwnKey(key, selected, input),
+    };
+  } catch (error) {
+    if (!canTryAnotherModel(error)) throw error;
+  }
+  const alternatives = rankedModels(await listGeminiModels(key))
+    .filter((name) => name !== selected)
+    .slice(0, MAX_MODEL_ATTEMPTS - 1);
+  for (const model of alternatives) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) break;
+    try {
+      return {
+        model,
+        plan: await generateWithOwnKey(key, model, input, remaining),
+      };
+    } catch (error) {
+      if (!canTryAnotherModel(error)) throw error;
+    }
+  }
+  throw noWorkingModel();
 }
 
 /** BYOK only: no storage, proxy, logging, or URL credentials. */
@@ -180,6 +301,7 @@ export async function generateWithOwnKey(
   key: string,
   model: string,
   input: Brief,
+  timeoutMs = 90000,
 ): Promise<Plan> {
   if (!validKey(key))
     throw new Error("Enter a valid Gemini API key in AI settings.");
@@ -209,6 +331,7 @@ export async function generateWithOwnKey(
         },
       }),
     },
+    timeoutMs,
   );
   const candidate = data.candidates?.[0];
   if (candidate?.finishReason === "MAX_TOKENS")

@@ -40,7 +40,7 @@ Gather turns a short event brief into a structured, editable plan. Share the occ
 ## Make it yours
 
 1. Open [Gather](https://gather-promptwars-2026-8f31.web.app) and select **Add Gemini key**.
-2. Enter your own key from [Google AI Studio](https://aistudio.google.com/api-keys), then choose **Use my key**. Gather checks the key with Google and loads available text models.
+2. Enter your own key from [Google AI Studio](https://aistudio.google.com/api-keys), then choose **Use my key**. Gather tests available text models and automatically selects one that responds.
 3. Select **New event**, add your details, and choose **Create my plan with Gemini**.
 4. Review and edit the plan. Track spending, complete tasks, and shortlist vendors.
 5. Export a copy whenever you like. Use **AI connected → Remove key** to forget your key; reloading the page also clears it.
@@ -106,7 +106,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. No environment file is needed; enter your Gemini key in the app when you want a personalized plan. You can change the model in AI settings if your key has access to a different Gemini model.
+Open the local URL printed by Vite. No environment file is needed; enter your Gemini key in the app when you want a personalized plan. Gather selects the model automatically. Connecting runs a small test request against your API quota.
 
 | Command           | Purpose                                 |
 | ----------------- | --------------------------------------- |
