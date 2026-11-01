@@ -36,18 +36,16 @@ import {
   getDocs,
   setDoc,
 } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { auth, db, functions } from "./firebase";
+import { auth, db } from "./firebase";
 import {
   briefSchema,
   eventSchema,
-  planSchema,
-  validateAllocation,
   type Brief,
   type EventData,
   type Plan,
 } from "../shared/schema";
 import { demoEvent, initialBrief } from "./demo";
+import { generateWithOwnKey, validKey, validModel } from "./gemini";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -88,6 +86,10 @@ function errorText(e: unknown) {
     : "Something went wrong. Please try again.";
 }
 export default function App() {
+  const apiKey = useRef("");
+  const [keyConnected, setKeyConnected] = useState(false);
+  const [keyPanel, setKeyPanel] = useState(false);
+  const [model, setModel] = useState("gemini-2.5-flash");
   const [event, setEvent] = useState<EventData>(readLocal);
   const [tab, setTab] = useState("Overview");
   const [user, setUser] = useState<User | null>(null);
@@ -212,18 +214,15 @@ export default function App() {
     const version = loadVersion.current;
     try {
       let next: EventData;
-      if (user && functions) {
-        const result = await httpsCallable<Brief, { plan: Plan }>(
-          functions,
-          "generatePlan",
-          { timeout: 95000 },
-        )(parsed.data);
+      if (keyConnected) {
+        const plan = await generateWithOwnKey(
+          apiKey.current,
+          model,
+          parsed.data,
+        );
         next = {
           brief: parsed.data,
-          plan: validateAllocation(
-            planSchema.parse(result.data.plan),
-            parsed.data,
-          ),
+          plan,
           source: "gemini",
           updatedAt: Date.now(),
         };
@@ -239,8 +238,8 @@ export default function App() {
       setModal(false);
       setNotice(
         next.source === "gemini"
-          ? "Your personalized Gemini plan is ready. Save it to your account."
-          : "Sample plan created locally. Sign in with configured Firebase to generate with Gemini.",
+          ? "Your personalized Gemini plan is ready. Changes are kept in this browser; export a copy or save to your account."
+          : "Sample plan created locally. Add your own Gemini key in AI settings for a personalized plan.",
       );
     } catch (e) {
       setError(errorText(e));
@@ -402,7 +401,7 @@ export default function App() {
           <div>
             <strong>{user?.displayName || "Your creative space"}</strong>
             <small>
-              {user ? "Personal account" : "Local demo · no sign-in"}
+              {user ? "Personal account" : "Local plans · no sign-in"}
             </small>
           </div>
           {user && (
@@ -431,16 +430,32 @@ export default function App() {
             My workspace <span>/</span> <strong>{tab}</strong>
           </div>
           <div className="top-actions">
+            <button
+              className="button small"
+              disabled={busy}
+              aria-expanded={keyPanel}
+              aria-controls="ai-settings"
+              onClick={() => setKeyPanel(!keyPanel)}
+            >
+              <Sparkles size={14} />
+              {keyConnected ? "AI connected" : "Add Gemini key"}
+            </button>
             <span className="mode">
               <span />
-              {user ? "Cloud workspace" : "Demo workspace"}
+              {keyConnected ? "Gemini connected" : "Sample workspace"}
             </span>
             <button
               className="button small"
               disabled={!ready || busy}
-              onClick={user ? save : login}
+              onClick={user ? save : auth ? login : exportPlan}
             >
-              {user ? (saved ? "Saved ✓" : "Save plan") : "Sign in"}
+              {user
+                ? saved
+                  ? "Saved ✓"
+                  : "Save plan"
+                : auth
+                  ? "Sign in"
+                  : "Export"}
               <ArrowUpRight size={14} />
             </button>
           </div>
@@ -495,6 +510,134 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
+          )}
+          {keyPanel && (
+            <section
+              className="card key-settings"
+              id="ai-settings"
+              aria-label="AI settings"
+            >
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">
+                    YOUR KEY. YOUR CREATIVE SPACE.
+                  </span>
+                  <h3>Bring your own Gemini</h3>
+                </div>
+                <button
+                  className="icon"
+                  aria-label="Close AI settings"
+                  onClick={() => setKeyPanel(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p>
+                Use your own key from{" "}
+                <a
+                  href="https://aistudio.google.com/api-keys"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Google AI Studio
+                </a>
+                . It is held only in memory until you remove it or reload this
+                page, and sent directly to Google with your event details. It is
+                never saved in browser storage, exported plans, or Firebase.
+              </p>
+              <p>
+                Browser keys are visible to the person using this browser. Use
+                your own key on a trusted device; usage counts toward your
+                Google API quota and any charges.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const data = new FormData(form);
+                  const key = String(data.get("geminiKey") || "").trim();
+                  const chosenModel = String(
+                    data.get("geminiModel") || "",
+                  ).trim();
+                  if (!validModel(chosenModel)) {
+                    setError(
+                      "Enter a Gemini model name, such as gemini-2.5-flash.",
+                    );
+                    return;
+                  }
+                  if (!keyConnected && !validKey(key)) {
+                    setError("Enter a valid Gemini API key.");
+                    return;
+                  }
+                  if (key && !validKey(key)) {
+                    setError("Enter a valid Gemini API key.");
+                    return;
+                  }
+                  if (key) apiKey.current = key;
+                  setKeyConnected(true);
+                  setModel(chosenModel);
+                  form.reset();
+                  setKeyPanel(false);
+                  setError("");
+                  setNotice(
+                    "Gemini key added for this tab only. Create a new event to generate your personalized plan.",
+                  );
+                }}
+              >
+                <div className="form-grid">
+                  <label>
+                    {keyConnected
+                      ? "Replace API key (optional)"
+                      : "Gemini API key"}
+                    <input
+                      type="password"
+                      name="geminiKey"
+                      autoComplete="off"
+                      spellCheck={false}
+                      required={!keyConnected}
+                      minLength={20}
+                      maxLength={200}
+                      placeholder={
+                        keyConnected
+                          ? "Leave blank to keep current key"
+                          : "Paste your own API key"
+                      }
+                      disabled={busy}
+                    />
+                  </label>
+                  <label>
+                    Gemini model
+                    <input
+                      name="geminiModel"
+                      defaultValue={model}
+                      required
+                      maxLength={88}
+                      disabled={busy}
+                    />
+                  </label>
+                </div>
+                <div className="key-actions">
+                  <button className="button primary" disabled={busy}>
+                    Use my key
+                  </button>
+                  {keyConnected && (
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={busy}
+                      onClick={() => {
+                        apiKey.current = "";
+                        setKeyConnected(false);
+                        setKeyPanel(false);
+                        setNotice("Gemini key removed from this tab.");
+                      }}
+                    >
+                      Remove key
+                    </button>
+                  )}
+                </div>
+              </form>
+            </section>
           )}
           <div className="event-toolbar">
             <div className="section-label">
@@ -997,7 +1140,7 @@ export default function App() {
                   <p>
                     {event.source === "gemini"
                       ? "Personalized with Gemini, inspired by your brief."
-                      : "Curated sample ideas. Connect Firebase and generate a new event for Gemini personalization."}
+                      : "Curated sample ideas. Add your own Gemini key and generate a new event for personalization."}
                   </p>
                 </div>
                 <Sparkles size={27} />
@@ -1183,9 +1326,9 @@ export default function App() {
             </p>
           )}
           <p className="footnote">
-            {user
-              ? "Gemini will receive these event details. Avoid sharing sensitive personal information."
-              : "Demo mode creates a local sample. Configure Firebase and sign in to generate a personalized Gemini plan."}{" "}
+            {keyConnected
+              ? "Your key and these event details will be sent directly to Google Gemini. Usage applies to your own API quota. Avoid sensitive personal information."
+              : "No Gemini key is connected. This creates a local sample. Add your own key in AI settings for a personalized Gemini plan; no sign-in is required."}{" "}
             Creating a plan replaces the current view; save or export edits
             first.
           </p>
@@ -1197,7 +1340,7 @@ export default function App() {
             )}{" "}
             {busy
               ? "Bringing your plan together…"
-              : user
+              : keyConnected
                 ? "Create my plan with Gemini"
                 : "Create a sample plan"}
           </button>

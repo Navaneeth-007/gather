@@ -1565,3 +1565,45 @@ footer,
 .budget-summary small {
   color: #65715e;
 }
+
+.key-settings {
+  margin: 0 0 24px;
+}
+.key-settings p {
+  max-width: 850px;
+}
+.key-settings .form-grid {
+  margin-top: 18px;
+}
+.key-settings .key-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+.key-settings a {
+  text-underline-offset: 3px;
+}
+@media (max-width: 540px) {
+  .top-actions {
+    gap: 7px;
+  }
+  .top-actions .small {
+    padding: 9px 8px;
+    font-size: 9px;
+  }
+  .top-actions .small svg {
+    width: 12px;
+  }
+  .crumb {
+    font-size: 10px;
+    margin-left: 8px;
+    gap: 7px;
+  }
+  .topbar {
+    padding: 0 12px;
+  }
+  .key-settings .form-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+}

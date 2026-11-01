@@ -9,7 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:rules": "firebase emulators:exec --project demo-gather --only firestore 'vitest run --config vitest.rules.config.ts'",
-    "check": "npm test && npm run build && npm --prefix functions run build"
+    "check": "npm test && npm run build && npm --prefix functions run build",
+    "check:repo": "node scripts/check-repo-size.mjs"
   },
   "dependencies": {
     "firebase": "^12.4.0",

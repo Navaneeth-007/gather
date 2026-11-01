@@ -17,3 +17,4 @@ jobs:
       - run: npm ci
       - run: npm --prefix functions ci
       - run: npm run check
+      - run: npm run check:repo
