@@ -1,0 +1,70 @@
+import React from "react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+vi.mock("../src/firebase", () => ({
+  auth: null,
+  db: null,
+  functions: null,
+  configured: false,
+}));
+import App from "../src/App";
+beforeEach(() => {
+  localStorage.clear();
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
+afterEach(cleanup);
+describe("planner interactions", () => {
+  it("edits budgets, tasks and vendor status, retaining changes locally", async () => {
+    const u = userEvent.setup();
+    render(<App />);
+    await u.click(screen.getByRole("button", { name: "Budget" }));
+    const amount = screen.getByLabelText("Venue & rentals spent");
+    await u.clear(amount);
+    await u.type(amount, "5000");
+    expect(
+      JSON.parse(localStorage.getItem("gather-demo")!).plan.budget[0].spent,
+    ).toBe(5000);
+    await u.click(screen.getByRole("button", { name: "Timeline" }));
+    await u.click(
+      screen.getByLabelText("Complete Find a venue that feels like you"),
+    );
+    expect(
+      JSON.parse(localStorage.getItem("gather-demo")!).plan.tasks[0].done,
+    ).toBe(true);
+    await u.click(screen.getByRole("button", { name: "Vendors" }));
+    await u.selectOptions(
+      screen.getAllByLabelText("Booking status")[0],
+      "Booked",
+    );
+    expect(
+      JSON.parse(localStorage.getItem("gather-demo")!).plan.vendors[0].status,
+    ).toBe("Booked");
+  });
+  it("creates a clearly labeled sample for a different event", async () => {
+    const u = userEvent.setup();
+    render(<App />);
+    await u.click(screen.getByRole("button", { name: "New event" }));
+    await u.click(screen.getByRole("button", { name: "Birthday" }));
+    await u.type(screen.getByLabelText("Event name"), "Maya’s birthday");
+    await u.click(screen.getByRole("button", { name: "Create a sample plan" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Maya’s birthday" }),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByText("SAMPLE PLAN")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Sample plan");
+  });
+  it("handles corrupt local data and explains unconfigured sign in", async () => {
+    localStorage.setItem("gather-demo", "broken");
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.getByRole("status").textContent).toContain("local demo mode");
+  });
+});
