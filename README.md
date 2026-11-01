@@ -2,6 +2,15 @@
 
 **Big moments. Little details.** A responsive, accessible GenAI event planner for Google Hack2Skill PromptWars. Plan weddings, birthdays, and community events with a realistic INR budget, editable checklist and dates, vendor notes, and personal ideas.
 
+## Dedicated project and live demo
+
+- Live Firebase demo: https://gather-promptwars-2026-8f31.web.app
+- Firebase project ID: `gather-promptwars-2026-8f31`
+- Web app ID: `1:334210586047:web:cf0646035a268a22cd7d0a`
+- Local working checkout: `/Users/navaneeth/Developer/gather`
+
+The hosted version currently uses the clearly labeled local sample mode. Cloud generation needs Blaze billing, the Gemini secret, Google Authentication, and App Check setup below. `.firebaserc` already selects this new project; `.env.example` contains its public web identifiers. Do not create a second Firebase project or run `firebase use --add` unless intentionally changing the deployment target.
+
 ## Try it in 60 seconds
 
 Requirements: Node 22+ and npm.
