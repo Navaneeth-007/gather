@@ -1,5 +1,11 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { generateWithOwnKey } from "../src/gemini";
+import {
+  generateWithOwnKey,
+  validKey,
+  normalizeKey,
+  listGeminiModels,
+  chooseAvailableModel,
+} from "../src/gemini";
 import { demoEvent, initialBrief } from "../src/demo";
 const key = "test_only_key_12345678901234567890";
 const brief = { ...initialBrief, date: "2099-02-14" };
@@ -7,19 +13,17 @@ afterEach(() => vi.unstubAllGlobals());
 describe("bring your own Gemini key", () => {
   it("sends the key only in a header to Google and validates structured output", async () => {
     const plan = demoEvent(brief).plan;
-    const fetcher = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          candidates: [
-            {
-              content: { parts: [{ text: JSON.stringify(plan) }] },
-              finishReason: "STOP",
-            },
-          ],
-        }),
-      });
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text: JSON.stringify(plan) }] },
+            finishReason: "STOP",
+          },
+        ],
+      }),
+    });
     vi.stubGlobal("fetch", fetcher);
     expect(await generateWithOwnKey(key, "gemini-2.5-flash", brief)).toEqual(
       plan,
@@ -49,13 +53,11 @@ describe("bring your own Gemini key", () => {
   it("gives quota errors without surfacing upstream payloads or credentials", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue({
-          ok: false,
-          status: 429,
-          json: async () => ({ error: { message: key } }),
-        }),
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: key } }),
+      }),
     );
     await expect(
       generateWithOwnKey(key, "gemini-2.5-flash", brief),
@@ -103,5 +105,80 @@ describe("bring your own Gemini key", () => {
     await expect(
       generateWithOwnKey(key, "gemini-2.5-flash", brief),
     ).rejects.toThrow("Could not reach Gemini");
+  });
+});
+
+describe("key verification and model discovery", () => {
+  it("accepts opaque keys with punctuation and longer authorization formats", () => {
+    expect(validKey("test.auth." + "x".repeat(300) + "+/=")).toBe(true);
+    expect(normalizeKey('  "test.key_123456789"  ')).toBe("test.key_123456789");
+    expect(validKey("test key with spaces")).toBe(false);
+    expect(validKey("test\r\nkey_12345678")).toBe(false);
+  });
+  it("lists compatible text models with header-only credentials and origin referrers", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            name: "models/gemini-2.5-flash",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/gemini-image",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/gemini-embedding",
+            supportedGenerationMethods: ["embedContent"],
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await listGeminiModels(key)).toEqual(["gemini-2.5-flash"]);
+    const [url, options] = fetcher.mock.calls[0];
+    expect(url).not.toContain(key);
+    expect(options.headers["x-goog-api-key"]).toBe(key);
+    expect(options.referrerPolicy).toBe("strict-origin-when-cross-origin");
+    expect(options.body).toBeUndefined();
+  });
+  it("uses only advertised model names and rejects an unavailable custom choice", () => {
+    expect(chooseAvailableModel("gemini-2.5-flash", ["gemini-2.5-flash"])).toBe(
+      "gemini-2.5-flash",
+    );
+    expect(chooseAvailableModel("gemini-old", ["gemini-3.5-flash-lite"])).toBe(
+      "gemini-3.5-flash-lite",
+    );
+    expect(() =>
+      chooseAvailableModel("gemini-old", ["gemini-pro-only"]),
+    ).toThrow("unavailable");
+  });
+  it("explains key and website restrictions without exposing upstream errors", async () => {
+    for (const [reason, expected] of [
+      ["API_KEY_INVALID", "Google rejected this API key"],
+      ["API_KEY_HTTP_REFERRER_BLOCKED", "blocks this website"],
+      ["API_KEY_SERVICE_BLOCKED", "cannot access the Gemini API"],
+    ]) {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue({
+            ok: false,
+            status: 403,
+            json: async () => ({
+              error: { message: key, details: [{ reason }] },
+            }),
+          }),
+      );
+      try {
+        await listGeminiModels(key);
+        throw new Error("Request should fail");
+      } catch (error) {
+        expect((error as Error).message).toContain(expected);
+        expect((error as Error).message).not.toContain(key);
+      }
+    }
   });
 });

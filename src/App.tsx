@@ -29,7 +29,14 @@ import {
   type Plan,
 } from "../shared/schema";
 import { demoEvent, initialBrief } from "./demo";
-import { generateWithOwnKey, validKey, validModel } from "./gemini";
+import {
+  generateWithOwnKey,
+  validKey,
+  validModel,
+  normalizeKey,
+  listGeminiModels,
+  chooseAvailableModel,
+} from "./gemini";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -67,6 +74,7 @@ export default function App() {
   const [keyConnected, setKeyConnected] = useState(false);
   const [keyPanel, setKeyPanel] = useState(false);
   const [model, setModel] = useState("gemini-2.5-flash");
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [event, setEvent] = useState<EventData>(readLocal);
   const [tab, setTab] = useState("Overview");
   const [modal, setModal] = useState(false);
@@ -371,11 +379,11 @@ export default function App() {
                 Google API quota and any charges.
               </p>
               <form
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
                   const form = e.currentTarget;
                   const data = new FormData(form);
-                  const key = String(data.get("geminiKey") || "").trim();
+                  const key = normalizeKey(String(data.get("geminiKey") || ""));
                   const chosenModel = String(
                     data.get("geminiModel") || "",
                   ).trim();
@@ -386,22 +394,41 @@ export default function App() {
                     return;
                   }
                   if (!keyConnected && !validKey(key)) {
-                    setError("Enter a valid Gemini API key.");
+                    setError(
+                      "Paste the complete Gemini key without spaces or line breaks.",
+                    );
                     return;
                   }
                   if (key && !validKey(key)) {
-                    setError("Enter a valid Gemini API key.");
+                    setError(
+                      "Paste the complete Gemini key without spaces or line breaks.",
+                    );
                     return;
                   }
-                  if (key) apiKey.current = key;
-                  setKeyConnected(true);
-                  setModel(chosenModel);
-                  form.reset();
-                  setKeyPanel(false);
                   setError("");
-                  setNotice(
-                    "Gemini key added for this tab only. Create a new event to generate your personalized plan.",
-                  );
+                  setNotice("");
+                  setBusy(true);
+                  try {
+                    const checkedKey = key || apiKey.current;
+                    const available = await listGeminiModels(checkedKey);
+                    setAvailableModels(available);
+                    const selected = chooseAvailableModel(
+                      chosenModel,
+                      available,
+                    );
+                    apiKey.current = checkedKey;
+                    setKeyConnected(true);
+                    setModel(selected);
+                    form.reset();
+                    setKeyPanel(false);
+                    setNotice(
+                      `Key verified with Google. Using ${selected}. Create a new event to generate your plan.`,
+                    );
+                  } catch (error) {
+                    setError(errorText(error));
+                  } finally {
+                    setBusy(false);
+                  }
                 }}
               >
                 <div className="form-grid">
@@ -415,8 +442,8 @@ export default function App() {
                       autoComplete="off"
                       spellCheck={false}
                       required={!keyConnected}
-                      minLength={20}
-                      maxLength={200}
+                      minLength={8}
+                      maxLength={4096}
                       placeholder={
                         keyConnected
                           ? "Leave blank to keep current key"
@@ -429,16 +456,27 @@ export default function App() {
                     Gemini model
                     <input
                       name="geminiModel"
+                      list="available-gemini-models"
                       defaultValue={model}
                       required
                       maxLength={88}
                       disabled={busy}
                     />
+                    <datalist id="available-gemini-models">
+                      {availableModels.map((name) => (
+                        <option key={name} value={name} />
+                      ))}
+                    </datalist>
                   </label>
                 </div>
+                <p className="footnote">
+                  Adding your key checks it with Google and loads available text
+                  models. Free-tier quota depends on your Google project and
+                  model.
+                </p>
                 <div className="key-actions">
                   <button className="button primary" disabled={busy}>
-                    Use my key
+                    {busy ? "Checking key…" : "Use my key"}
                   </button>
                   {keyConnected && (
                     <button
@@ -448,6 +486,7 @@ export default function App() {
                       onClick={() => {
                         apiKey.current = "";
                         setKeyConnected(false);
+                        setAvailableModels([]);
                         setKeyPanel(false);
                         setNotice("Gemini key removed from this tab.");
                       }}

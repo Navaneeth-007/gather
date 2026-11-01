@@ -77,6 +77,18 @@ it("uses a memory-only key without an account and can remove it", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url, init) => {
+      if (String(_url).includes("/models?"))
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                name: "models/gemini-2.5-flash",
+                supportedGenerationMethods: ["generateContent"],
+              },
+            ],
+          }),
+        };
       const body = JSON.parse(String(init.body));
       const brief = JSON.parse(body.contents[0].parts[0].text);
       return {
@@ -98,6 +110,9 @@ it("uses a memory-only key without an account and can remove it", async () => {
   await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
   await u.type(screen.getByLabelText("Gemini API key"), secret);
   await u.click(screen.getByRole("button", { name: "Use my key" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "AI connected" })).toBeTruthy(),
+  );
   expect(screen.queryByDisplayValue(secret)).toBeNull();
   expect(localStorage.getItem("gather-demo")).not.toContain(secret);
   await u.click(screen.getByRole("button", { name: "New event" }));
@@ -116,7 +131,24 @@ it("uses a memory-only key without an account and can remove it", async () => {
 });
 it("retains the existing plan when Gemini rejects a request", async () => {
   const u = userEvent.setup();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url) =>
+      String(url).includes("/models?")
+        ? {
+            ok: true,
+            json: async () => ({
+              models: [
+                {
+                  name: "models/gemini-2.5-flash",
+                  supportedGenerationMethods: ["generateContent"],
+                },
+              ],
+            }),
+          }
+        : { ok: false, status: 403 },
+    ),
+  );
   render(<App />);
   await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
   await u.type(
@@ -124,6 +156,9 @@ it("retains the existing plan when Gemini rejects a request", async () => {
     "test_only_key_12345678901234567890",
   );
   await u.click(screen.getByRole("button", { name: "Use my key" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "AI connected" })).toBeTruthy(),
+  );
   await u.click(screen.getByRole("button", { name: "New event" }));
   await u.type(screen.getByLabelText("Event name"), "Rejected celebration");
   await u.click(
@@ -137,4 +172,63 @@ it("retains the existing plan when Gemini rejects a request", async () => {
   expect(JSON.parse(localStorage.getItem("gather-demo")!).brief.name).toBe(
     "Ananya & Aarav’s wedding",
   );
+});
+
+it("accepts a long punctuation-containing key and selects an available model", async () => {
+  const u = userEvent.setup();
+  const secret = "test.auth." + "x".repeat(260);
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        models: [
+          {
+            name: "models/gemini-3.5-flash-lite",
+            supportedGenerationMethods: ["generateContent"],
+          },
+        ],
+      }),
+    });
+  vi.stubGlobal("fetch", fetcher);
+  render(<App />);
+  await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
+  await u.type(screen.getByLabelText("Gemini API key"), secret);
+  await u.click(screen.getByRole("button", { name: "Use my key" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "AI connected" })).toBeTruthy(),
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "gemini-3.5-flash-lite",
+  );
+  expect(localStorage.getItem("gather-demo")).not.toContain(secret);
+  expect(fetcher.mock.calls[0][1].headers["x-goog-api-key"]).toBe(secret);
+});
+it("keeps invalid server-rejected keys disconnected without echoing credentials", async () => {
+  const u = userEvent.setup();
+  const secret = "test.auth.key_123456789";
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: secret, details: [{ reason: "API_KEY_INVALID" }] },
+        }),
+      }),
+  );
+  render(<App />);
+  await u.click(screen.getByRole("button", { name: "Add Gemini key" }));
+  await u.type(screen.getByLabelText("Gemini API key"), secret);
+  await u.click(screen.getByRole("button", { name: "Use my key" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Google rejected this API key",
+    ),
+  );
+  expect(screen.queryByRole("button", { name: "AI connected" })).toBeNull();
+  expect(screen.getByRole("alert").textContent).not.toContain(secret);
+  expect(localStorage.getItem("gather-demo")).not.toContain(secret);
 });
